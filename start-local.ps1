@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$backendV5 = Join-Path $projectRoot "backend_v5"
-$backendMdm = Join-Path $projectRoot "backend_mdm"
+$backendV5 = Join-Path $projectRoot "V5"
+$backendMdm = Join-Path $projectRoot "MDM"
 $frontend = Join-Path $projectRoot "frontend"
 
 $v5Python = Join-Path $backendV5 ".venv\Scripts\python.exe"

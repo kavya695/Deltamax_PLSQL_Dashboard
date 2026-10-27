@@ -1020,7 +1020,7 @@ def security():
         cur = conn.cursor()
         run_id = _latest_security_run(cur)
         if not run_id:
-            return {"ready": False, "hint": "No successful Oracle security run is available yet. Run security_pipeline/run_security_oracle.py."}
+            return {"ready": False, "hint": "No successful Oracle security run is available yet. Run security/run_security_oracle.py."}
 
         cur.execute("SELECT SUMMARY_JSON FROM SEC_SUMMARY WHERE RUN_ID = :run_id", run_id=run_id)
         row = cur.fetchone()
@@ -1131,7 +1131,7 @@ def forecast():
         cur = conn.cursor()
         forecasts, alerts, has_run = _latest_arima_results(cur)
         if not has_run:
-            return {"ready": False, "hint": "No ARIMA forecast run found in Oracle. Run backend_v5/04_ARIMA_Predictive_Trust_Alerts.py after the V5 trust and staging data are ready."}
+            return {"ready": False, "hint": "No ARIMA forecast run found in Oracle. Run V5/04_ARIMA_Predictive_Trust_Alerts.py after the V5 trust and staging data are ready."}
 
         # The ARIMA script trains on these same monthly means and trust values.
         cur.execute("""

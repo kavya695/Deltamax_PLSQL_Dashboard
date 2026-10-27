@@ -51,7 +51,7 @@ The generator deliberately clears the MDM staging/scores/golden tables before lo
 Run `oracle/03_queries.sql` in SQL Developer (F5). Expected approximate scale with `MDM_NUM_CUSTOMERS=1000`: source records between 3,000 and 5,000; golden records about 1,000. Counts depend on the random generation.
 
 ## 7. Connect the MDM results to the shared frontend
-The MDM API reads the tables above and serves the existing MDM overview, source systems, review queue, and cluster details. In a PowerShell window opened in `backend_mdm`, install the API dependencies and start it:
+The MDM API reads the tables above and serves the existing MDM overview, source systems, review queue, and cluster details. In a PowerShell window opened in `MDM`, install the API dependencies and start it:
 ```powershell
 python -m pip install -r requirements-oracle.txt
 $env:MDM_DB_USER = "DELTAMAX_V5"
@@ -62,7 +62,7 @@ $env:MDM_DB_SERVICE = "FREEPDB1"
 python -m uvicorn main:app --reload --host 127.0.0.1 --port 8001
 ```
 
-Keep that window open. Start the Vite frontend in another PowerShell window from `frontend` with `npm run dev`. The Vite proxy sends `/api/mdm` requests to port 8001 and continues sending the other API requests to the V5 backend on port 8000. Turn off the dashboard's Demo mode to see live Oracle MDM results. The MDM API is read-only; run `python .\run_mdm_pipeline.py` from `backend_mdm` when you need to refresh the Oracle data.
+Keep that window open. Start the Vite frontend in another PowerShell window from `frontend` with `npm run dev`. The Vite proxy sends `/api/mdm` requests to port 8001 and continues sending the other API requests to the V5 backend on port 8000. Turn off the dashboard's Demo mode to see live Oracle MDM results. The MDM API is read-only; run `python .\run_mdm_pipeline.py` from `MDM` when you need to refresh the Oracle data.
 
 ## Notes
 - The uploaded source generator previously wrote `results/*.csv` and imported `bq_utils.upload_to_bq`. Those storage actions have been removed from the Oracle version.

@@ -4,7 +4,7 @@ This package exposes a read-only FastAPI layer over the existing Oracle V5 resul
 
 ## Run
 
-From the `V5/V5` folder:
+From the `V5` folder:
 
 ```powershell
 python -m pip install -r requirements-api.txt
@@ -22,7 +22,7 @@ The frontend Security Posture page reads the latest successful security run from
 - `GET /api/security` returns summary metrics, category/severity counts, column findings, example findings, and the 50 lowest scoring records.
 - `GET /api/security/finding/{record_id}/{finding_type}` returns the selected record's findings for the detail modal. Use `all` for every finding on that record.
 
-The API connects to the same Oracle schema using `DELTAMAX_ORACLE_USER`, `DELTAMAX_ORACLE_PASSWORD`, and `DELTAMAX_ORACLE_DSN` (the existing V5 settings). For a separate security schema, set `SECURITY_ORACLE_USER`, `SECURITY_ORACLE_PASSWORD`, and `SECURITY_ORACLE_DSN` for the API process and grant it read access to the security tables. Run `security_pipeline/run_security_oracle.py` first to create a successful run.
+The API connects to the same Oracle schema using `DELTAMAX_ORACLE_USER`, `DELTAMAX_ORACLE_PASSWORD`, and `DELTAMAX_ORACLE_DSN` (the existing V5 settings). For a separate security schema, set `SECURITY_ORACLE_USER`, `SECURITY_ORACLE_PASSWORD`, and `SECURITY_ORACLE_DSN` for the API process and grant it read access to the security tables. Run `security/run_security_oracle.py` first to create a successful run.
 
 ## Churn results for all months
 

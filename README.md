@@ -2,8 +2,8 @@
 
 This project keeps one shared React/Vite frontend and separates the two Python backends:
 
-- `backend_v5/` contains the DeltaMax V5 API and processing pipeline.
-- `backend_mdm/` contains the Oracle MDM pipeline and SQL scripts from `MDM_Oracle_No_CSV_No_GCP.zip`.
+- `V5/` contains the DeltaMax V5 API and processing pipeline.
+- `MDM/` contains the Oracle MDM pipeline and SQL scripts from `MDM_Oracle_No_CSV_No_GCP.zip`.
 - `migration_pipeline/` contains the integrated Oracle migration pipeline from `Migration_Pipeline_Oracle_No_CSV_No_GCP_Integrated.zip`.
 - `frontend/` is shared by both backends.
 
@@ -34,7 +34,7 @@ The Vite development server proxies `/api/mdm` to the MDM API at `http://localho
 
 ## DeltaMax V5 backend
 
-Open PowerShell in `backend_v5/`:
+Open PowerShell in `V5/`:
 
 ```powershell
 python -m venv .venv
@@ -53,9 +53,9 @@ The V5 processing scripts are `01_generate_data.py` through `06_Business_Churn_R
 
 ## Oracle MDM backend
 
-The MDM archive contents are in `backend_mdm/`. Follow `backend_mdm/README_ORACLE.md` for Oracle setup and pipeline instructions. Its dependency list is `requirements-oracle.txt`; its pipeline entry point is `run_mdm_pipeline.py`.
+The MDM archive contents are in `MDM/`. Follow `MDM/README_ORACLE.md` for Oracle setup and pipeline instructions. Its dependency list is `requirements-oracle.txt`; its pipeline entry point is `run_mdm_pipeline.py`.
 
-The MDM scripts are kept separate from V5. The MDM dashboard API is `backend_mdm/main.py`. Set the `MDM_DB_*` environment variables from the MDM README and start it with `python -m uvicorn main:app --reload --host 127.0.0.1 --port 8001` from `backend_mdm/`. Vite proxies `/api/mdm` to that service (`MDM_BACKEND_URL`, default `http://localhost:8001`) and all other API paths to the V5 backend (`BACKEND_URL`, default `http://localhost:8000`).
+The MDM scripts are kept separate from V5. The MDM dashboard API is `MDM/main.py`. Set the `MDM_DB_*` environment variables from the MDM README and start it with `python -m uvicorn main:app --reload --host 127.0.0.1 --port 8001` from `MDM/`. Vite proxies `/api/mdm` to that service (`MDM_BACKEND_URL`, default `http://localhost:8001`) and all other API paths to the V5 backend (`BACKEND_URL`, default `http://localhost:8000`).
 
 ## Oracle migration pipeline
 
@@ -65,10 +65,10 @@ The Cloud Migration sidebar has separate **Oracle → BigQuery** and **BigQuery 
 
 ## Oracle security pipeline
 
-The Oracle security pipeline from `Security_Pipeline_Oracle_Integrated.zip` is in `security_pipeline/`. It runs independently from the V5, MDM and migration pipelines. The Security Posture frontend page reads its latest Oracle results through the V5 API at `/api/security`; finding details are served by `/api/security/finding/{record_id}/{finding_type}`. Use the same Oracle schema for the security tables and API, or configure the API's `SECURITY_ORACLE_USER`, `SECURITY_ORACLE_PASSWORD`, and `SECURITY_ORACLE_DSN` variables and grant read access to those tables. Follow `security_pipeline/README.md` to create the schema and package before running it. From the `DeltaMax_V5_Integrated_UI` directory, use PowerShell:
+The Oracle security pipeline from `Security_Pipeline_Oracle_Integrated.zip` is in `security/`. It runs independently from the V5, MDM and migration pipelines. The Security Posture frontend page reads its latest Oracle results through the V5 API at `/api/security`; finding details are served by `/api/security/finding/{record_id}/{finding_type}`. Use the same Oracle schema for the security tables and API, or configure the API's `SECURITY_ORACLE_USER`, `SECURITY_ORACLE_PASSWORD`, and `SECURITY_ORACLE_DSN` variables and grant read access to those tables. Follow `security/README.md` to create the schema and package before running it. From the `DeltaMax_V5_Integrated_UI` directory, use PowerShell:
 
 ```powershell
-cd security_pipeline
+cd security
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
