@@ -18,4 +18,5 @@ dist/
 # Generated pipeline output and local reports
 results/
 *.csv
+*.png
 *.log
