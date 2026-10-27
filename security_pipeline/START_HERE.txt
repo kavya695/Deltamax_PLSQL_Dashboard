@@ -1,0 +1,5 @@
+1) Run oracle_security_schema_and_package.sql in SQL Developer with F5.
+2) Install requirements.txt in a Python virtual environment.
+3) Set ORACLE_USER, ORACLE_PASSWORD and ORACLE_DSN in PowerShell.
+4) Run: python run_security_oracle.py
+5) Verify SEC_RUNS, SEC_LOG, SEC_DATASETS, SEC_ROWS and SEC_SUMMARY in SQL Developer.

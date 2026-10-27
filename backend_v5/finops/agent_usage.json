@@ -1,0 +1,1 @@
+{"queries": 64, "bytes_processed": 132900, "bytes_known_queries": 8, "bytes_unknown_queries": 56, "by_agent": {"exec": {"queries": 34, "bytes": 0}, "security": {"queries": 2, "bytes": 0}, "migration": {"queries": 1, "bytes": 0}}, "updated": "2026-07-29T10:06:09.759504+00:00"}

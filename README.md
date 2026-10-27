@@ -1,93 +1,82 @@
-# Deltamax PLSQL
+﻿# DeltaMax V5 and Oracle MDM
 
+This project keeps one shared React/Vite frontend and separates the two Python backends:
 
+- `backend_v5/` contains the DeltaMax V5 API and processing pipeline.
+- `backend_mdm/` contains the Oracle MDM pipeline and SQL scripts from `MDM_Oracle_No_CSV_No_GCP.zip`.
+- `migration_pipeline/` contains the integrated Oracle migration pipeline from `Migration_Pipeline_Oracle_No_CSV_No_GCP_Integrated.zip`.
+- `frontend/` is shared by both backends.
 
-## Getting started
+## Start all services together
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Start Oracle Database first, then open one VS Code PowerShell terminal at the project root and run:
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.com/neualto-technologies-pvt-ltd-group/deltamax/deltamax-plsql.git
-git branch -M main
-git push -uf origin main
+```powershell
+cd "C:\Users\ksont\Downloads\DeltaMax_V5_Month_Names_Only\DeltaMax_V5_Integrated_UI"
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\start-local.ps1
 ```
 
-## Integrate with your tools
+The script securely prompts for the Oracle password if it is not already set, starts both the V5 API and MDM API, starts the shared Vite frontend, and checks that the APIs can connect to Oracle. By default, both APIs use the same Oracle account and password; if MDM uses a separate database user, set `MDM_DB_USER` and `MDM_DB_PASSWORD` first. It reuses healthy services already running and checks failed health responses. If port 8001 is stuck or occupied by an unhealthy listener, it chooses a free MDM port from 8002–8010 and restarts this project's Vite process with the correct MDM proxy. Open `http://localhost:5173` when the script says all services are ready.
 
-* [Set up project integrations](https://gitlab.com/neualto-technologies-pvt-ltd-group/deltamax/deltamax-plsql/-/settings/integrations)
+Core Engine, Executive AI, Cloud Migration, and Security use the V5 API; MDM uses its separate API. The Oracle listener must be available at the configured DSN (default `localhost:1521/FREEPDB1`). Set `DELTAMAX_ORACLE_DSN`, `DELTAMAX_ORACLE_USER`, `MDM_DB_*`, `BQ_PROJECT`, or `BQ_DATASET` in the terminal before running the script if your setup differs. Starting services does not execute data pipelines or modify database contents.
 
-## Collaborate with your team
+## Shared frontend
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Start the frontend from `frontend/`:
 
-## Test and Deploy
+```powershell
+npm install
+npm run dev
+```
 
-Use the built-in continuous integration in GitLab.
+The Vite development server proxies `/api/mdm` to the MDM API at `http://localhost:8001` and other `/api` requests to the V5 API at `http://localhost:8000` by default. Set `MDM_BACKEND_URL` or `BACKEND_URL` to change either target.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## DeltaMax V5 backend
 
-***
+Open PowerShell in `backend_v5/`:
 
-# Editing this README
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-api.txt
+$env:DELTAMAX_ORACLE_USER = "DELTAMAX_V5"
+$env:DELTAMAX_ORACLE_PASSWORD = "YOUR_ORACLE_PASSWORD"
+$env:DELTAMAX_ORACLE_DSN = "localhost:1521/FREEPDB1"
+python -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+API health: http://127.0.0.1:8000/api/health  
+API docs: http://127.0.0.1:8000/docs
 
-## Suggestions for a good README
+The V5 processing scripts are `01_generate_data.py` through `06_Business_Churn_Risk_Prediction.py`. The frontend's Executive AI overview uses the V5 Oracle API. Some other legacy dashboard pages may not have matching V5 endpoints.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## Oracle MDM backend
 
-## Name
-Choose a self-explaining name for your project.
+The MDM archive contents are in `backend_mdm/`. Follow `backend_mdm/README_ORACLE.md` for Oracle setup and pipeline instructions. Its dependency list is `requirements-oracle.txt`; its pipeline entry point is `run_mdm_pipeline.py`.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+The MDM scripts are kept separate from V5. The MDM dashboard API is `backend_mdm/main.py`. Set the `MDM_DB_*` environment variables from the MDM README and start it with `python -m uvicorn main:app --reload --host 127.0.0.1 --port 8001` from `backend_mdm/`. Vite proxies `/api/mdm` to that service (`MDM_BACKEND_URL`, default `http://localhost:8001`) and all other API paths to the V5 backend (`BACKEND_URL`, default `http://localhost:8000`).
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## Oracle migration pipeline
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+The Oracle migration pipeline is stored separately in `migration_pipeline/`. See `migration_pipeline/README.md` and `migration_pipeline/START_HERE.txt` for setup and run instructions. This integrated version expects a valid `MIGRATION_PKG` in the selected Oracle schema.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+The Cloud Migration sidebar has separate **Oracle → BigQuery** and **BigQuery → Oracle** pages. On the BigQuery → Oracle page, select `hab_combined`, `mig_pipeline_data`, or both, then start the reverse migration. Existing Oracle rows are replaced after confirmation; a failed table load rolls that table back. Missing destination tables are created from the source schema where Oracle supports the mapped types. Configure Google Application Default Credentials and install `migration_pipeline/requirements.txt` in the migration virtual environment. Set `DELTAMAX_ORACLE_PASSWORD` (or `ORACLE_PASSWORD`) in the V5 API terminal. Progress and per-table row-count validation appear on that page.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Oracle security pipeline
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+The Oracle security pipeline from `Security_Pipeline_Oracle_Integrated.zip` is in `security_pipeline/`. It runs independently from the V5, MDM and migration pipelines. The Security Posture frontend page reads its latest Oracle results through the V5 API at `/api/security`; finding details are served by `/api/security/finding/{record_id}/{finding_type}`. Use the same Oracle schema for the security tables and API, or configure the API's `SECURITY_ORACLE_USER`, `SECURITY_ORACLE_PASSWORD`, and `SECURITY_ORACLE_DSN` variables and grant read access to those tables. Follow `security_pipeline/README.md` to create the schema and package before running it. From the `DeltaMax_V5_Integrated_UI` directory, use PowerShell:
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```powershell
+cd security_pipeline
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+$env:ORACLE_USER = "DELTAMAX_V5"
+$env:ORACLE_PASSWORD = "YOUR_ORACLE_PASSWORD"
+$env:ORACLE_DSN = "localhost:1521/FREEPDB1"
+python run_security_oracle.py
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Optional run size: `python run_security_oracle.py --rows 400 --seeded 6`.

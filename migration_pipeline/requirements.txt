@@ -1,0 +1,6 @@
+oracledb>=2.0
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+google-cloud-bigquery>=3.25.0
+pyarrow>=14.0.0

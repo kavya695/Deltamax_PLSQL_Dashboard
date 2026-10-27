@@ -1,0 +1,1 @@
+Run oracle_schema.sql in SQL Developer (F5), set MIG_DB_* variables, install requirements.txt, then run python .\run_all_oracle.py. See README.md.

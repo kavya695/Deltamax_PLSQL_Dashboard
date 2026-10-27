@@ -1,0 +1,19 @@
+{
+  "bigquery_table": "datatoolunstructured.deltamax_migration.mig_pipeline_data",
+  "oracle_table": "DELTAMAX_V5.BQ_MIG_PIPELINE_DATA",
+  "bigquery_rows": 70358,
+  "oracle_rows": 70358,
+  "columns_compared": 8,
+  "comparison_method": "SHA-256 of all columns normalized according to BigQuery schema; multiset duplicate counts preserved",
+  "exact_full_row_matches_including_repeats": 0,
+  "bigquery_only_row_occurrences": 70358,
+  "oracle_only_row_occurrences": 70358,
+  "distinct_bigquery_only_row_fingerprints": 70358,
+  "distinct_oracle_only_row_fingerprints": 70358,
+  "result": "MISMATCHES_FOUND",
+  "notes": [
+    "Read-only comparison.",
+    "Duplicate business/month keys are supported.",
+    "Normalization follows BigQuery column types to align driver representations."
+  ]
+}

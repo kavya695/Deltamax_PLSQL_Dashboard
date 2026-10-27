@@ -1,0 +1,46 @@
+{
+  "currency": "USD",
+  "cur_report_s3_uri": "",
+  "budget": {
+    "monthly_limit": 30.0,
+    "alert_thresholds": [
+      80,
+      90,
+      100
+    ]
+  },
+  "pricing": {
+    "bq_tb_scanned": 5.0
+  },
+  "guardrails": [
+    {
+      "threshold_pct": 80,
+      "action": "warn",
+      "label": "Soft cap \u2014 notify owners",
+      "processes": [
+        "Large email-report CSV attachments",
+        "Ad-hoc Executive Report Studio exports"
+      ]
+    },
+    {
+      "threshold_pct": 90,
+      "action": "throttle",
+      "label": "Throttle non-critical compute",
+      "processes": [
+        "ARIMA monthly backtest (06)",
+        "Scheduled weekly anomaly scan"
+      ]
+    },
+    {
+      "threshold_pct": 100,
+      "action": "pause",
+      "label": "Hard cap \u2014 pause discretionary spend",
+      "processes": [
+        "BigQuery Conversational agent",
+        "Ad-hoc pipeline re-runs",
+        "Non-essential BigQuery scans"
+      ]
+    }
+  ],
+  "billing_table": "https://console.cloud.google.com/billing/018FC6-CC1985-24653C/reports;projects=deltamax-464321?project=deltamax-464321"
+}

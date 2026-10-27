@@ -1,0 +1,283 @@
+{
+  "run_id": "20261024_222526",
+  "source_cloud": "Oracle",
+  "target_cloud": "BigQuery",
+  "project": "datatoolunstructured",
+  "dataset": "deltamax_migration",
+  "location": "asia-south1",
+  "status": "SUCCESS",
+  "published": true,
+  "publish_requested": true,
+  "error": null,
+  "tables": [
+    {
+      "table": "DM_V5_ANOMALY_RESULTS",
+      "stage": "_stage_dm_v5_anomaly_results_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_anomaly_results",
+      "oracle_rows": 9300,
+      "bigquery_rows": 9300,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_ARIMA_ALERTS",
+      "stage": "_stage_dm_v5_arima_alerts_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_arima_alerts",
+      "oracle_rows": 16,
+      "bigquery_rows": 16,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_ARIMA_FORECASTS",
+      "stage": "_stage_dm_v5_arima_forecasts_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_arima_forecasts",
+      "oracle_rows": 36,
+      "bigquery_rows": 36,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_CHURN_FEATURE_IMPORTANCE",
+      "stage": "_stage_dm_v5_churn_feature_importance_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_churn_feature_importance",
+      "oracle_rows": 192,
+      "bigquery_rows": 192,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_CHURN_MODEL_METRICS",
+      "stage": "_stage_dm_v5_churn_model_metrics_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_churn_model_metrics",
+      "oracle_rows": 12,
+      "bigquery_rows": 12,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_CHURN_RISK_RESULTS",
+      "stage": "_stage_dm_v5_churn_risk_results_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_churn_risk_results",
+      "oracle_rows": 9292,
+      "bigquery_rows": 9292,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_ERROR_LOG",
+      "stage": "_stage_dm_v5_error_log_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_error_log",
+      "oracle_rows": 6657,
+      "bigquery_rows": 6657,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_QUALITY_RESULTS",
+      "stage": "_stage_dm_v5_quality_results_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_quality_results",
+      "oracle_rows": 9303,
+      "bigquery_rows": 9303,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_STG_CREDIT_BUREAU",
+      "stage": "_stage_dm_v5_stg_credit_bureau_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_stg_credit_bureau",
+      "oracle_rows": 9300,
+      "bigquery_rows": 9300,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "DM_V5_TRUST_RESULTS",
+      "stage": "_stage_dm_v5_trust_results_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.dm_v5_trust_results",
+      "oracle_rows": 12,
+      "bigquery_rows": 12,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MDM_CUSTOMER_GOLDEN",
+      "stage": "_stage_mdm_customer_golden_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mdm_customer_golden",
+      "oracle_rows": 1000,
+      "bigquery_rows": 1000,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MDM_CUSTOMER_SCORES",
+      "stage": "_stage_mdm_customer_scores_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mdm_customer_scores",
+      "oracle_rows": 3999,
+      "bigquery_rows": 3999,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MDM_CUSTOMER_STG",
+      "stage": "_stage_mdm_customer_stg_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mdm_customer_stg",
+      "oracle_rows": 3999,
+      "bigquery_rows": 3999,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MDM_RUN_LOG",
+      "stage": "_stage_mdm_run_log_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mdm_run_log",
+      "oracle_rows": 3,
+      "bigquery_rows": 3,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIGR_CONTROL",
+      "stage": "_stage_migr_control_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.migr_control",
+      "oracle_rows": 1,
+      "bigquery_rows": 1,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIGR_FILES",
+      "stage": "_stage_migr_files_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.migr_files",
+      "oracle_rows": 280,
+      "bigquery_rows": 280,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIGR_JSON_LOGS",
+      "stage": "_stage_migr_json_logs_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.migr_json_logs",
+      "oracle_rows": 10,
+      "bigquery_rows": 10,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIGR_LOG",
+      "stage": "_stage_migr_log_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.migr_log",
+      "oracle_rows": 628,
+      "bigquery_rows": 628,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIGR_ROWS",
+      "stage": "_stage_migr_rows_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.migr_rows",
+      "oracle_rows": 815745,
+      "bigquery_rows": 815745,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIGR_RUNS",
+      "stage": "_stage_migr_runs_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.migr_runs",
+      "oracle_rows": 8,
+      "bigquery_rows": 8,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIG_PIPELINE_DATA",
+      "stage": "_stage_mig_pipeline_data_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mig_pipeline_data",
+      "oracle_rows": 70358,
+      "bigquery_rows": 70358,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIG_PIPELINE_LOG",
+      "stage": "_stage_mig_pipeline_log_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mig_pipeline_log",
+      "oracle_rows": 28,
+      "bigquery_rows": 28,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIG_PIPELINE_METRICS",
+      "stage": "_stage_mig_pipeline_metrics_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mig_pipeline_metrics",
+      "oracle_rows": 22,
+      "bigquery_rows": 22,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "MIG_PIPELINE_RUNS",
+      "stage": "_stage_mig_pipeline_runs_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.mig_pipeline_runs",
+      "oracle_rows": 2,
+      "bigquery_rows": 2,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "SEC_DATASETS",
+      "stage": "_stage_sec_datasets_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.sec_datasets",
+      "oracle_rows": 8,
+      "bigquery_rows": 8,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "SEC_LOG",
+      "stage": "_stage_sec_log_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.sec_log",
+      "oracle_rows": 12,
+      "bigquery_rows": 12,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "SEC_ROWS",
+      "stage": "_stage_sec_rows_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.sec_rows",
+      "oracle_rows": 2423,
+      "bigquery_rows": 2423,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "SEC_RUNS",
+      "stage": "_stage_sec_runs_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.sec_runs",
+      "oracle_rows": 1,
+      "bigquery_rows": 1,
+      "passed": true,
+      "published": true
+    },
+    {
+      "table": "SEC_SUMMARY",
+      "stage": "_stage_sec_summary_20261024_222526",
+      "final": "datatoolunstructured.deltamax_migration.sec_summary",
+      "oracle_rows": 1,
+      "bigquery_rows": 1,
+      "passed": true,
+      "published": true
+    }
+  ],
+  "metrics": {
+    "table_count": 29,
+    "tables_passed": 29,
+    "total_oracle_rows": 942648,
+    "total_bigquery_rows": 942648,
+    "count_mismatches": 0
+  },
+  "updated_at": "2026-10-24T22:54:08+05:30"
+}

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeltaMax — Data Quality Intelligence Platform</title>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4D8E2R74E3"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-4D8E2R74E3');
+    </script>
+    <script>
+      // Set theme before render to avoid a flash. Stored choice wins; else OS preference.
+      (function () {
+        try {
+          var t = localStorage.getItem('dm-theme');
+          if (!t) t = 'light';
+          if (t === 'dark') document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Use the checked-in production bundle when the source tree is unavailable. -->
+    <link rel="stylesheet" crossorigin href="/dist/assets/index-DTLOAUGg.css">
+    <script>
+      // The recovered bundle contains the former hosted API URL. Keep local
+      // development on the local Vite proxy so migration metadata matches the
+      // local Oracle → BigQuery backend.
+      (function () {
+        var hosted = 'https://deltamax-dashboard-1.onrender.com';
+        var fetchImpl = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+          if (typeof input === 'string' && input.indexOf(hosted + '/api/') === 0) {
+            input = input.slice(hosted.length);
+          }
+          if (input === '/api/migration/bigquery-to-oracle') {
+            return fetchImpl('/api/migration', init).then(function (response) {
+              return response.json().then(function (forward) {
+                var tables = (forward.tables || []).map(function (item) {
+                  var rows = item.bigquery_rows || item.oracle_rows || 0;
+                  return {
+                    run_id: forward.run_id || '',
+                    source_table: item.final || item.table || '',
+                    oracle_table: item.table || '',
+                    destination_created: 'true',
+                    source_rows_expected: String(rows),
+                    oracle_rows_before: String(item.oracle_rows || rows),
+                    oracle_rows_after: String(item.oracle_rows || rows),
+                    status: item.passed ? 'SUCCESS' : 'FAILED',
+                    details: item.passed
+                      ? 'Already transferred and available in Oracle.'
+                      : 'The completed migration report marked this table as failed.'
+                  };
+                });
+                var passed = tables.filter(function (item) { return item.status === 'SUCCESS'; }).length;
+                return new Response(JSON.stringify({
+                  ready: true,
+                  run_id: forward.run_id || '',
+                  source_cloud: 'Google BigQuery',
+                  target_cloud: 'Oracle Database',
+                  status: tables.length && passed === tables.length ? 'SUCCESS' : 'FAILED',
+                  metrics: {
+                    table_count: tables.length,
+                    tables_passed: passed,
+                    total_source_rows: tables.reduce(function (sum, item) { return sum + Number(item.source_rows_expected || 0); }, 0),
+                    total_oracle_rows: tables.reduce(function (sum, item) { return sum + Number(item.oracle_rows_after || 0); }, 0)
+                  },
+                  tables: tables
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+              });
+            });
+          }
+          return fetchImpl(input, init);
+        };
+      })();
+    </script>
+    <script type="module" crossorigin src="/dist/assets/index-BeY6Nl8X.js"></script>
+    <script src="/reverse-ui.js"></script>
+  </body>
+</html>
