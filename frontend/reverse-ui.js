@@ -150,6 +150,8 @@
       .local-alert-why { margin-top:7px; font-size:13px; line-height:1.5; color:#0f7b6b; }
       .local-alert-page button { border:1px solid var(--border,#dedede); border-radius:9px; padding:9px 14px; background:var(--card,#fff); color:var(--foreground,#111827); font:inherit; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:5px; }
       .local-alert-page button:hover { background:var(--muted,#f5f5f5); }
+      .dm-save-config-toast { position:fixed; top:76px; left:12px; z-index:10000; max-width:272px; padding:10px 12px; border:1px solid #b7efd1; border-radius:9px; background:#e8fff2; color:#087f5b; font-size:13px; line-height:1.45; box-shadow:0 4px 14px rgba(15,118,110,.12); }
+      .dm-save-config-toast strong { color:#087f5b; }
       .local-alert-send { position:absolute; right:16px; top:16px; font-size:12.5px; padding:7px 12px; }
       .local-alert-why { margin-top:9px; color:#64748b; font-size:13px; line-height:1.5; }
       @media(max-width:760px) {
@@ -748,6 +750,91 @@
     });
   }
 
+  function compactPriorMonthsLabel() {
+    if (location.hash.indexOf('#/exec/overview') !== 0) return;
+    document.querySelectorAll('main .card').forEach(function (card) {
+      var text = String(card.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (text.indexOf('avg trust') === -1 || text.indexOf('prior months') === -1) return;
+      card.querySelectorAll('p, div, span').forEach(function (node) {
+        var value = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/^Mean of\s+/i.test(value) && value.length > 20) {
+          node.textContent = 'Mean of Jan\u2013Nov';
+        }
+      });
+    });
+  }
+
+  function installHyperparamSaveToast(main) {
+    if (location.hash.indexOf('#/engine/hyperparams') !== 0) return;
+    if (!window.__dmHyperparamToastClickBound) {
+      window.__dmHyperparamToastClickBound = true;
+      document.addEventListener('click', function (event) {
+        if (location.hash.indexOf('#/engine/hyperparams') !== 0) return;
+        var target = event.target && event.target.closest ? event.target.closest('button') : null;
+        if (!target) return;
+        var label = String(target.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        if (label !== 'save config' && label.indexOf('save') === -1) return;
+        window.setTimeout(function () {
+          var old = document.querySelector('.dm-save-config-toast');
+          if (old) old.remove();
+          var toast = document.createElement('div');
+          toast.className = 'dm-save-config-toast';
+          toast.innerHTML = '<span aria-hidden="true">✓</span> Saved as <strong>"Custom config"</strong>. Re-run the pipeline to apply the changes.';
+          document.body.appendChild(toast);
+          window.setTimeout(function () { if (toast.parentNode) toast.remove(); }, 8000);
+        }, 80);
+      }, true);
+    }
+    var saveButton = Array.from(main.querySelectorAll('button')).find(function (button) {
+      return String(button.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'save config';
+    });
+    if (!saveButton) return;
+
+    if (saveButton.getAttribute('data-dm-save-toast-bound') !== '1') {
+      saveButton.setAttribute('data-dm-save-toast-bound', '1');
+      saveButton.addEventListener('click', function () {
+        window.setTimeout(function () {
+          var old = document.querySelector('.dm-save-config-toast');
+          if (old) old.remove();
+          var toast = document.createElement('div');
+          toast.className = 'dm-save-config-toast';
+          toast.innerHTML = '<span aria-hidden="true">✓</span> Saved as <strong>"Custom config"</strong>. Re-run the pipeline to apply the changes.';
+          document.body.appendChild(toast);
+          window.setTimeout(function () { if (toast.parentNode) toast.remove(); }, 5000);
+        }, 120);
+      });
+    }
+
+    /* The bundled Hyperparameters page does not currently render this
+       control. Add it next to the native Save Config action, while leaving
+       the native save handler and the global pipeline runner untouched. */
+    var rerunButton = Array.from(main.querySelectorAll('button')).find(function (button) {
+      var label = String(button.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      return label.indexOf('save') !== -1 && label.indexOf('re-run') !== -1 && label.indexOf('pipeline') !== -1;
+    });
+    if (!rerunButton) {
+      rerunButton = document.createElement('button');
+      rerunButton.type = 'button';
+      rerunButton.className = saveButton.className || 'refresh-btn';
+      rerunButton.style.cssText = 'width:100%;margin-bottom:6px;justify-content:center;color:var(--foreground,#111827);font-size:12px;';
+      rerunButton.innerHTML = '<i class="ti ti-player-play" style="font-size:13px"></i>&nbsp;Save &amp; Re-run Pipeline';
+      rerunButton.setAttribute('data-dm-save-rerun', '1');
+      saveButton.parentNode.insertBefore(rerunButton, saveButton.nextSibling);
+    }
+    if (rerunButton.getAttribute('data-dm-rerun-bound') !== '1') {
+      rerunButton.setAttribute('data-dm-rerun-bound', '1');
+      rerunButton.addEventListener('click', function () {
+        saveButton.click();
+        window.setTimeout(function () {
+          var runButton = Array.from(document.querySelectorAll('button')).find(function (button) {
+            return String(button.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'run pipelines';
+          });
+          if (runButton) runButton.click();
+        }, 700);
+      });
+    }
+  }
+
   function setUseCaseRow(tbody, name, score) {
     var row = Array.from(tbody.querySelectorAll('tr')).find(function (item) {
       return item.getAttribute('data-dm-use-case') === name;
@@ -822,6 +909,15 @@
   function ensureExecOverviewCards(main) {
     if (location.hash.indexOf('#/exec/overview') !== 0) return;
 
+    /* Remove the bundle's older versions before mounting the corrected pair. */
+    main.querySelectorAll('.card').forEach(function (card) {
+      if (card.closest('.exec-overview-injected')) return;
+      var text = String(card.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (text.indexOf('future predictive alerts') !== -1 || text.indexOf('use case trust scores') !== -1) {
+        card.remove();
+      }
+    });
+
     /* Defer insertion to after React's render cycle */
     window.setTimeout(function() {
       var m = document.querySelector('main, .dm-content');
@@ -838,16 +934,23 @@
     if (!wrapper) {
       wrapper = document.createElement('div');
       wrapper.className = 'exec-overview-injected exec-two-col-row';
-      /* Insert AFTER the last existing card (trust chart, health factor card etc.) */
-      var allCards = main.querySelectorAll('.card');
-      var lastCard = allCards.length ? allCards[allCards.length - 1] : null;
-      if (lastCard && lastCard.nextSibling) {
-        main.insertBefore(wrapper, lastCard.nextSibling);
-      } else if (lastCard) {
-        lastCard.parentNode.insertBefore(wrapper, lastCard.nextSibling);
-      } else {
-        main.appendChild(wrapper);
+    }
+
+    /* Always reposition, including after React commits a new overview tree.
+       This keeps the required order stable instead of relying on the wrapper's
+       first insertion location. */
+    var chartCard = Array.from(main.querySelectorAll('.card')).find(function (item) {
+      var title = String(item.textContent || '').toLowerCase();
+      return title.indexOf('overall trust') !== -1 &&
+        title.indexOf('monthly actual') !== -1 &&
+        title.indexOf('arima forecast') !== -1;
+    });
+    if (chartCard && chartCard.parentNode) {
+      if (wrapper.previousElementSibling !== chartCard) {
+        chartCard.parentNode.insertBefore(wrapper, chartCard.nextSibling);
       }
+    } else if (!wrapper.parentNode) {
+      main.appendChild(wrapper);
     }
 
     /* ---- FUTURE PREDICTIVE ALERTS ---- */
@@ -1066,16 +1169,22 @@
       document.querySelectorAll('.exec-mom-card').forEach(function (card) { card.remove(); });
       return;
     }
-    // Remove both the compatibility card and the original empty forecast
-    // card so this section does not remain at the end of ARIMA Forecast.
+    /* Remove the bundle's empty placeholder; the compatibility card below is
+       the single data-driven Month-over-month chart. */
     main.querySelectorAll('.card, section').forEach(function (card) {
+      if (card.classList.contains('exec-mom-card')) return;
       var text = String(card.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
       if (text.indexOf('month-over-month pillar change (%)') !== -1) card.remove();
     });
-    return;
     if (pillarTrendRows) {
       var existing = main.querySelector('.exec-mom-card');
-      if (existing) return;
+      if (existing) {
+        /* React may append forecast cards after the first compatibility pass.
+           Moving the existing node is idempotent and guarantees this chart
+           remains the final section on the page. */
+        main.appendChild(existing);
+        return;
+      }
       var chart = buildMonthOverMonthChart(pillarTrendRows);
       if (!chart) return;
       var card = document.createElement('section');
@@ -1090,22 +1199,8 @@
       wrap.className = 'exec-mom-chart';
       wrap.appendChild(chart);
       card.append(title, subtitle, wrap);
-      var anchor = Array.from(main.querySelectorAll('.card')).find(function (item) {
-        var text = String(item.textContent || '').toLowerCase();
-        return text.indexOf('predictive alerts') !== -1;
-      });
-      if (!anchor) anchor = Array.from(main.querySelectorAll('.card')).find(function (item) {
-        var text = String(item.textContent || '').toLowerCase();
-        return text.indexOf('overall trust') !== -1 || text.indexOf('trust score') !== -1 || text.indexOf('dataset trust') !== -1;
-      });
-      if (anchor && anchor.parentElement) {
-        anchor.parentElement.insertBefore(card, anchor.nextSibling);
-      } else {
-        // Fall back: insert after the first card found in main, or just append
-        var firstCard = main.querySelector('.card');
-        if (firstCard && firstCard.parentElement) firstCard.parentElement.insertBefore(card, firstCard.nextSibling);
-        else main.appendChild(card);
-      }
+      /* The ARIMA Forecast page ends with this chart. */
+      main.appendChild(card);
       return;
     }
     if (pillarTrendRequestStarted) return;
@@ -2534,7 +2629,15 @@
       // The recovered React bundle commits some labels after the first pass.
       // Repeat normalization after those commits so mojibake cannot reappear.
       [150, 500, 1200, 2500].forEach(function (delay) {
-        window.setTimeout(function () { if (document.body) normalizeText(document.body); }, delay);
+        window.setTimeout(function () {
+          if (!document.body) return;
+          normalizeText(document.body);
+          hideSecurityPostureNav();
+          hideExecutiveSecurityCard();
+          compactPriorMonthsLabel();
+          var hyperMain = document.querySelector('main, .dm-content');
+          if (hyperMain) installHyperparamSaveToast(hyperMain);
+        }, delay);
       });
       var isReverse = location.hash.indexOf('#/migration/reverse') === 0;
       var main = document.querySelector('main, .dm-content');
@@ -2560,12 +2663,15 @@
       }
       main.classList.toggle('reverse-migration-page', isReverse);
       installStyle();
+      installHyperparamSaveToast(main);
       renderCloudMigration(main);
       styleAnomalyPage(main);
       removeHyperparamPipelineInstruction(main);
       updateOverallTrustChart(main);
+      compactPriorMonthsLabel();
       updateExecutivePredictiveAlerts(main);
       updateOracleUseCaseScores(main);
+      ensureExecOverviewCards(main);
       updateMonthOverMonthPillarChart(main);
       if (location.hash.indexOf('#/exec/overview') === 0) {
         [200, 600, 1400, 2800].forEach(function (delay) {
@@ -2573,9 +2679,25 @@
             var m = document.querySelector('main, .dm-content');
             if (!m) return;
             updateOverallTrustChart(m);
+            compactPriorMonthsLabel();
             updateExecutivePredictiveAlerts(m);
             updateOracleUseCaseScores(m);
+            ensureExecOverviewCards(m);
             updateMonthOverMonthPillarChart(m);
+          }, delay);
+        });
+      }
+      if (location.hash.indexOf('#/exec/alerts') === 0) {
+        /* React mounts the Alerts route asynchronously. Re-apply the existing
+           styled renderer after each mount phase so the native table view
+           cannot win the race and remain visible. */
+        [150, 500, 1200, 2500].forEach(function (delay) {
+          window.setTimeout(function () {
+            var alertMain = document.querySelector('main, .dm-content');
+            if (!alertMain || location.hash.indexOf('#/exec/alerts') !== 0) return;
+            installStyle();
+            renderOracleAlerts(alertMain);
+            removeLegacyAlertsTable(alertMain);
           }, delay);
         });
       }
