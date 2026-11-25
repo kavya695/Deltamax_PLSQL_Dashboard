@@ -79,7 +79,26 @@
         };
       })();
     </script>
-    <script type="module" crossorigin src="/dist/assets/index-BeY6Nl8X.js"></script>
-    <script src="/reverse-ui.js"></script>
+    <script>
+      // The migration compatibility renderer must be active before React's
+      // first render. The bundled migration component uses this flag to keep
+      // its hook order stable while the Cloud Migration view is mounted.
+      if (location.hash.indexOf('#/migration') === 0) {
+        window.__dmCloudMigration = true;
+      }
+    </script>
+    <script type="module" crossorigin src="/dist/assets/index-AffectedFilterFix.js"></script>
+    <!-- Load the migration enhancement as a module after the React bundle. -->
+    <script defer src="/reverse-ui.js?v=20261142"></script>
+    <script>
+      // Never leave a silent white screen if the recovered bundle fails before
+      // React can mount. This is a diagnostic only; it does not replace the app.
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (root && !root.firstElementChild) {
+          root.innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;background:#eef7ff;font-family:Arial,sans-serif;color:#172033;padding:24px"><div style="max-width:620px;background:#fff;border:1px solid #dbe4ec;border-radius:14px;padding:24px;box-shadow:0 8px 24px rgba(15,23,42,.08)"><h1 style="margin:0 0 10px;font-size:20px">DeltaMax could not start</h1><p style="margin:0;color:#64748b;line-height:1.55">The dashboard bundle did not mount. Refresh this page once, then check that the local Vite server is running on port 5173.</p></div></div>';
+        }
+      }, 5000);
+    </script>
   </body>
 </html>

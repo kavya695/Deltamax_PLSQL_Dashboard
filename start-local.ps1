@@ -74,6 +74,16 @@ function Test-ApiReady($url, $databaseUser) {
     }
 }
 
+function Test-ApiEmailConfigured($url) {
+    try {
+        $response = Invoke-RestMethod -Uri "$url/api/email/config" -TimeoutSec 4
+        return $response.configured -eq $true
+    }
+    catch {
+        return $false
+    }
+}
+
 $mdmPort = 8001
 $mdmListener = Get-Listener $mdmPort
 if ($mdmListener -and -not (Test-ApiReady "http://127.0.0.1:$mdmPort/api/health" $env:MDM_DB_USER)) {
@@ -104,14 +114,65 @@ if ($mdmListener -and -not (Test-ApiReady "http://127.0.0.1:$mdmPort/api/health"
 
 $env:MDM_BACKEND_URL = "http://localhost:$mdmPort"
 
+$v5Port = 8000
+$v5Listener = Get-Listener $v5Port
+if ($v5Listener -and -not (Test-ApiReady "http://127.0.0.1:$v5Port/api/health" $env:DELTAMAX_ORACLE_USER)) {
+    $v5Port = $null
+    foreach ($candidatePort in 8011..8020) {
+        if (Get-Listener $candidatePort) {
+            continue
+        }
+        $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $candidatePort)
+        try {
+            $probe.Start()
+            $v5Port = $candidatePort
+            break
+        }
+        catch {
+            continue
+        }
+        finally {
+            $probe.Stop()
+        }
+    }
+
+    if (-not $v5Port) {
+        throw "V5 port 8000 is occupied and no free replacement port was found between 8011 and 8020."
+    }
+    Write-Host "Port 8000 is occupied by an unhealthy V5 listener; using port $v5Port instead."
+}
+
+if ((Get-Listener $v5Port) -and $env:DELTAMAX_SENDGRID_API_KEY -and $env:DELTAMAX_ALERT_SENDER -and
+    -not (Test-ApiEmailConfigured "http://127.0.0.1:$v5Port")) {
+    $configuredPort = $null
+    foreach ($candidatePort in 8011..8020) {
+        if (Get-Listener $candidatePort) { continue }
+        $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $candidatePort)
+        try {
+            $probe.Start()
+            $configuredPort = $candidatePort
+            break
+        }
+        catch { continue }
+        finally { $probe.Stop() }
+    }
+    if (-not $configuredPort) {
+        throw "The existing V5 API lacks the email settings, and no free replacement port was found between 8011 and 8020."
+    }
+    Write-Host "The existing V5 API was started without email settings; starting a configured API on port $configuredPort."
+    $v5Port = $configuredPort
+}
+
+$env:BACKEND_URL = "http://localhost:$v5Port"
+
 $services = @(
     [pscustomobject]@{
         Name = "V5 API"
-        Port = 8000
-        HealthUrl = "http://127.0.0.1:8000/api/health"
+        Port = $v5Port
+        HealthUrl = "http://127.0.0.1:$v5Port/api/health"
         User = $env:DELTAMAX_ORACLE_USER
         Executable = $v5Python
-        Arguments = "-m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000"
+        Arguments = "-m uvicorn api.main:app --reload --host 127.0.0.1 --port $v5Port"
         WorkingDirectory = $backendV5
     },
     [pscustomobject]@{
@@ -147,13 +208,13 @@ foreach ($service in $services) {
 }
 
 $frontendListener = Get-Listener 5173
-if ($frontendListener -and $mdmPort -ne 8001) {
+if ($frontendListener -and ($mdmPort -ne 8001 -or $v5Port -ne 8000)) {
     $frontendProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($frontendListener.OwningProcess)" -ErrorAction SilentlyContinue
     $frontendCommand = if ($frontendProcess) { $frontendProcess.CommandLine } else { "" }
     if (-not $frontendProcess -or $frontendProcess.Name -ne "node.exe" -or
         $frontendCommand -notmatch "vite[\\/]+bin[\\/]+vite\.js" -or
         $frontendCommand -notlike "*$frontend*") {
-        throw "MDM is using port $mdmPort, but port 5173 belongs to a process that is not this project's Vite server. Restart the project frontend with MDM_BACKEND_URL=$env:MDM_BACKEND_URL."
+        throw "A backend is using a replacement port, but port 5173 belongs to a process that is not this project's Vite server. Restart the project frontend with BACKEND_URL=$env:BACKEND_URL and MDM_BACKEND_URL=$env:MDM_BACKEND_URL."
     }
     Stop-Process -Id $frontendListener.OwningProcess
     $frontendDeadline = (Get-Date).AddSeconds(10)
@@ -163,7 +224,7 @@ if ($frontendListener -and $mdmPort -ne 8001) {
     if (Get-Listener 5173) {
         throw "Could not restart the project frontend to use the MDM API on port $mdmPort."
     }
-    Write-Host "Restarted the project frontend so its MDM proxy can use port $mdmPort."
+    Write-Host "Restarted the project frontend with V5 API $env:BACKEND_URL and MDM API $env:MDM_BACKEND_URL."
     $frontendListener = $null
 }
 
@@ -217,7 +278,7 @@ foreach ($service in $servicesToStart) {
 Write-Host ""
 Write-Host "All services are ready:"
 Write-Host "  Frontend: http://localhost:5173"
-Write-Host "  V5 API:   http://127.0.0.1:8000/docs"
+Write-Host "  V5 API:   http://127.0.0.1:$v5Port/docs"
 Write-Host "  MDM API:  http://127.0.0.1:$mdmPort/docs"
 Write-Host "Core Engine, Executive AI, Cloud Migration, and Security use the V5 API; MDM uses the MDM API."
 Write-Host "Services start without executing data pipelines or changing database contents."

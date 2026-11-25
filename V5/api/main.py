@@ -6,6 +6,13 @@ This layer exposes the V5 read API and starts the Oracle-backed migration pipeli
 import os
 import math
 import json
+import base64
+import csv
+import html
+import io
+import re
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -13,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import oracledb
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pipeline_config import CONFIG_PATH, DEFAULT_PARAMS, load_config, validate_params
 
@@ -279,6 +286,65 @@ def anomaly_record_detail(record_id: int):
         if drift_values:
             bins[min(int(own_drift * 5), 4)]["is_record"] = True
 
+        batch_trust = {}
+        try:
+            cur.execute("""
+                SELECT OVERALL_DATASET_TRUST, BUSINESS_HEALTH, FRESHNESS_HEALTH
+                FROM DM_V5_TRUST_RESULTS WHERE BATCH_ID = :batch_id
+                FETCH FIRST 1 ROW ONLY
+            """, {"batch_id": record.get("a_batch_id")})
+            trust_row = cur.fetchone()
+            if trust_row:
+                batch_trust = {
+                    "overall_trust": _percent(trust_row[0]),
+                    "business_health": _percent(trust_row[1]),
+                    "batch_freshness_health": _percent(trust_row[2]),
+                }
+        except oracledb.DatabaseError:
+            batch_trust = {}
+
+        # These checks are evaluated from the actual staged Oracle fields.
+        rule_specs = [
+            ("totalCreditLimit", "Non-negative total credit limit", lambda v: v >= 0),
+            ("availableCredit", "Non-negative available credit", lambda v: v >= 0),
+            ("outstandingDebt", "Non-negative outstanding debt", lambda v: v >= 0),
+            ("availableCredit", "Available credit does not exceed total limit", lambda v: v <= float(raw_record.get("totalCreditLimit"))),
+            ("creditUtilizationRatio", "Credit-utilisation ratio in range", lambda v: 0 <= v <= 100),
+            ("creditScore", "Credit score in range", lambda v: 300 <= v <= 850),
+            ("creditWorthinessScore", "Creditworthiness score in range", lambda v: 300 <= v <= 850),
+            ("paymentHistoryScore", "Payment history score in range", lambda v: 0 <= v <= 100),
+            ("annualRevenue", "Non-negative annual revenue", lambda v: v >= 0),
+            ("employeeCount", "Non-negative employee count", lambda v: v >= 0),
+            ("numberOfAccounts", "Non-negative account count", lambda v: v >= 0),
+            ("numberOfInquiries", "Non-negative inquiry count", lambda v: v >= 0),
+            ("delinquentAccountCount", "Non-negative delinquent account count", lambda v: v >= 0),
+            ("collectionsCount", "Non-negative collections count", lambda v: v >= 0),
+            ("chargeoffCount", "Non-negative charge-off count", lambda v: v >= 0),
+            ("judgmentCount", "Non-negative judgment count", lambda v: v >= 0),
+            ("taxLienCount", "Non-negative tax-lien count", lambda v: v >= 0),
+            ("publicRecordCount", "Non-negative public-record count", lambda v: v >= 0),
+            ("monthsSinceLastPayment", "Non-negative months since payment", lambda v: v >= 0),
+            ("monthsSinceFirstAccount", "Non-negative account age", lambda v: v >= 0),
+            ("monthsSinceLastDelinquency", "Non-negative months since delinquency", lambda v: v >= 0),
+            ("debtToIncomeRatio", "Debt-to-income ratio in range", lambda v: 0 <= v <= 1),
+        ]
+        violated, skipped, schema_fields = [], [], []
+        for index, (field, label, check) in enumerate(rule_specs, 1):
+            value = raw_record.get(field)
+            if value is None:
+                skipped.append({"key": f"rule_{index}", "label": label})
+                continue
+            try:
+                valid = bool(check(float(value)))
+            except (TypeError, ValueError):
+                valid = False
+            if not valid:
+                severity = "CRITICAL" if field in {"totalCreditLimit", "availableCredit"} and float(value) < 0 else "HIGH"
+                violated.append({"key": f"rule_{index}", "label": label, "severity": severity, "detail": f"{field} = {value}"})
+                if field not in schema_fields:
+                    schema_fields.append(field)
+        rules_catalogue = [{"key": f"rule_{index}", "label": label, "severity": "HIGH"} for index, (_, label, _) in enumerate(rule_specs, 1)]
+
         risk = _percent(record.get("a_risk")) or 0
         fired_count = sum(item["fired"] for item in detectors)
         return {
@@ -286,25 +352,26 @@ def anomaly_record_detail(record_id: int):
             "businessID": record.get("a_businessid"), "lineage": record.get("a_data_lineage"),
             "severity": "HIGH" if risk >= 70 else "MEDIUM" if risk >= 50 else "LOW",
             "overall_anomaly_risk": risk, "fired_count": fired_count,
-            "raw_record": raw_record, "schema_anomaly_fields": [],
+            "raw_record": raw_record, "schema_anomaly_fields": schema_fields,
             "trust_metrics": {
-                "overall_trust": None,
+                "overall_trust": batch_trust.get("overall_trust"),
                 "anomaly_health": _percent(record.get("a_anomaly_health")),
                 "drift_health": _percent(record.get("a_drift_health")),
-                "business_health": None,
+                "business_health": batch_trust.get("business_health"),
                 "freshness_health": _percent(record.get("a_freshness_health")),
             },
-            "trust_threshold": None, "below_threshold": None, "detectors": detectors,
+            "trust_threshold": 75, "below_threshold": batch_trust.get("overall_trust") is not None and batch_trust["overall_trust"] < 75, "detectors": detectors,
             "drift_distribution": {
                 "lineage": record.get("a_data_lineage"), "lineage_records": len(drift_values),
                 "record_drift_health": _percent(record.get("a_drift_health")), "bins": bins,
             } if drift_values else None,
             "business_rules": {
-                "evaluable": False, "estimated_violations": None,
-                "note": "Record-level business-rule details are not stored in the V5 anomaly results.",
-                "catalogue": [],
+                "evaluable": True, "total_rules": len(rule_specs),
+                "violated_count": len(violated), "violated": violated,
+                "skipped_count": len(skipped), "skipped": skipped,
+                "catalogue": rules_catalogue,
             },
-            "freshness_days_late": record.get("freshness_days_late"), "freshness_tau": None,
+            "freshness_days_late": record.get("freshness_days_late"), "freshness_tau": 5,
         }
     except oracledb.DatabaseError as exc:
         oracle_error = exc.args[0] if exc.args else None
@@ -393,6 +460,118 @@ def executive_alerts():
         return {"ready": True, "alerts": output}
     finally:
         conn.close()
+
+
+_SENT_EMAIL_LOG: list[dict[str, Any]] = []
+
+
+def record_email_attempt(recipient: str, kind: str, rows: list[dict[str, Any]], status: str, error: str | None = None):
+    if kind == "single" and rows:
+        alert = f"{rows[0].get('series_name') or 'Alert'} · {rows[0].get('forecast_month') or ''}"
+        severity = rows[0].get("severity") or "—"
+    elif kind == "anomaly":
+        alert, severity = "Anomaly report", "REPORT"
+    else:
+        alert, severity = f"ARIMA alerts report ({len(rows)})", "REPORT"
+    _SENT_EMAIL_LOG.insert(0, {
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "recipient": recipient,
+        "kind": kind,
+        "alert": alert,
+        "severity": severity,
+        "subject": alert,
+        "status": status,
+        "error": error,
+    })
+    del _SENT_EMAIL_LOG[200:]
+
+
+@app.get("/api/email/config")
+def email_config_status():
+    missing = [name for name, value in (
+        ("DELTAMAX_SENDGRID_API_KEY", os.getenv("DELTAMAX_SENDGRID_API_KEY")),
+        ("DELTAMAX_ALERT_SENDER", os.getenv("DELTAMAX_ALERT_SENDER")),
+    ) if not value]
+    return {"configured": not missing, "missing": missing}
+
+
+@app.get("/api/email/sent")
+def email_sent_log():
+    return {"sent": list(_SENT_EMAIL_LOG)}
+
+
+@app.post("/api/email/send")
+async def send_dashboard_email(request: Request):
+    """Send the selected Oracle-backed alert report using configured SendGrid credentials."""
+    body = await request.json()
+    recipient = str(body.get("recipient", "")).strip()
+    kind = str(body.get("kind", "all")).strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", recipient):
+        raise HTTPException(status_code=422, detail="Enter a valid recipient email address.")
+    api_key = os.getenv("DELTAMAX_SENDGRID_API_KEY")
+    sender = os.getenv("DELTAMAX_ALERT_SENDER")
+    if not api_key or not sender:
+        missing = [name for name, value in (("DELTAMAX_SENDGRID_API_KEY", api_key), ("DELTAMAX_ALERT_SENDER", sender)) if not value]
+        raise HTTPException(status_code=503, detail="Email is not configured. Set " + " and ".join(missing) + " for the V5 backend, then restart it.")
+    if kind not in {"all", "arima", "single", "anomaly"}:
+        raise HTTPException(status_code=400, detail="Unsupported email report type.")
+
+    attachments = []
+    if kind == "anomaly":
+        conn = get_connection()
+        try:
+            rows = _engine_rows(conn.cursor())
+            flagged = [row for row in rows if _engine_flagged(row)]
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["record_id", "business_id", "data_lineage", "trust", "anomaly_risk"])
+            for row in flagged:
+                writer.writerow([row.get("record_id"), row.get("businessid"), row.get("data_lineage"), _percent(row.get("anomaly_health")), _percent(row.get("overall_anomaly_risk"))])
+            csv_data = output.getvalue().encode("utf-8")
+            attachments.append({"content": base64.b64encode(csv_data).decode("ascii"), "type": "text/csv", "filename": "deltamax-anomalies.csv", "disposition": "attachment"})
+            rows = [{"series_name": "Anomaly report", "forecast_month": "Latest Oracle batch", "forecast_value": len(flagged), "threshold_value": 75, "severity": "INFO", "trigger_type": "Records below the 0.75 trust threshold", "reason": f"{len(flagged)} flagged records out of {len(rows)} total records."}]
+            subject = "DeltaMax anomaly report"
+        finally:
+            conn.close()
+    else:
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            forecasts, alerts, available = _latest_arima_results(cur)
+        finally:
+            conn.close()
+        if not available:
+            raise HTTPException(status_code=409, detail="There is no ARIMA alert run to email yet.")
+        if kind == "single":
+            metric = str(body.get("metric", "")).lower()
+            month = str(body.get("month", ""))[:7]
+            alerts = [row for row in alerts if str(row.get("series_name", "")).lower() == metric and str(row.get("forecast_month", ""))[:7] == month]
+        if not alerts:
+            raise HTTPException(status_code=404, detail="No matching alert was found to email.")
+        subject = "DeltaMax V5 predictive trust alert" if kind == "single" else f"DeltaMax V5 ARIMA alerts ({len(alerts)})"
+        rows = alerts
+
+    html_rows = "".join("<tr>" + "".join(f"<td style=\"padding:8px;border-bottom:1px solid #ddd\">{html.escape(str(value if value is not None else '?'))}</td>" for value in (row.get("series_name"), row.get("forecast_month"), row.get("forecast_value"), row.get("threshold_value"), row.get("severity"), row.get("reason"))) + "</tr>" for row in rows)
+    content = "<html><body><h2>DeltaMax predictive alerts</h2><table><thead><tr><th>Metric</th><th>Month</th><th>Forecast</th><th>Threshold</th><th>Severity</th><th>Reason</th></tr></thead><tbody>" + html_rows + "</tbody></table></body></html>"
+    message = {"personalizations": [{"to": [{"email": recipient}]}], "from": {"email": sender}, "subject": subject, "content": [{"type": "text/html", "value": content}]}
+    if attachments:
+        message["attachments"] = attachments
+    req = urllib.request.Request("https://api.sendgrid.com/v3/mail/send", data=json.dumps(message).encode("utf-8"), headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        if exc.code == 403 and ("verified sender" in detail.lower() or "sender identity" in detail.lower()):
+            detail = "The SendGrid From address is not verified. Verify it in SendGrid, set DELTAMAX_ALERT_SENDER to that same address, then restart V5."
+        record_email_attempt(recipient, kind, rows, "FAILED", f"HTTP Error {exc.code}: {detail}")
+        raise HTTPException(status_code=502, detail=f"SendGrid rejected the email ({exc.code}): {detail}") from exc
+    except Exception as exc:
+        record_email_attempt(recipient, kind, rows, "FAILED", f"Could not reach SendGrid: {type(exc).__name__}")
+        raise HTTPException(status_code=502, detail=f"Could not reach SendGrid: {type(exc).__name__}") from exc
+    record_email_attempt(recipient, kind, rows, "SENT")
+    sent = dict(_SENT_EMAIL_LOG[0], alert_count=len(rows), provider_status=status)
+    return {"ok": True, "sent": sent}
 
 
 @app.get("/api/churn/{batch_id}")
@@ -517,10 +696,13 @@ def _engine_rows(cur):
                A.MISSING_FLAG, A.DUPLICATE_FLAG, A.ARIMA_FLAG,
                A.OVERALL_ANOMALY_RISK, A.ANOMALY_HEALTH, A.DRIFT_HEALTH,
                A.MAHALANOBIS_SCORE, A.WELCH_SCORE, A.PSI_SCORE,
-               A.FRESHNESS_HEALTH, S.FRESHNESS_DAYS_LATE
+               A.FRESHNESS_HEALTH, S.FRESHNESS_DAYS_LATE,
+               Q.QUALITY_HEALTH, Q.BUSINESS_RULE_FLAGS
         FROM DM_V5_ANOMALY_RESULTS A
         LEFT JOIN DM_V5_STG_CREDIT_BUREAU S
           ON S.BATCH_ID = A.BATCH_ID AND S.RECORD_ID = A.RECORD_ID
+        LEFT JOIN DM_V5_QUALITY_RESULTS Q
+          ON Q.BATCH_ID = A.BATCH_ID AND Q.RECORD_ID = A.RECORD_ID
         ORDER BY A.BATCH_ID, A.RECORD_ID
     """)
     return clean_rows(rows_as_dicts(cur))
@@ -537,6 +719,19 @@ def _engine_current_trust(cur):
     return rows[-1] if rows else None
 
 
+def _engine_trust_by_batch(cur):
+    cur.execute("""
+        SELECT BATCH_ID, ANOMALY_HEALTH, DRIFT_HEALTH,
+               BUSINESS_HEALTH, FRESHNESS_HEALTH, OVERALL_DATASET_TRUST
+        FROM DM_V5_TRUST_RESULTS
+        ORDER BY BATCH_ID
+    """)
+    return {
+        row["batch_id"]: row
+        for row in clean_rows(rows_as_dicts(cur))
+    }
+
+
 def _engine_flagged(row):
     return any(row.get(column) for _, column in ENGINE_METHODS)
 
@@ -546,32 +741,60 @@ def _engine_percent(value):
 
 
 @app.get("/api/anomaly-records")
-def anomaly_records(lineage: str = "all", limit: int = Query(100, ge=1, le=500), business: str | None = None):
+def anomaly_records(lineage: str = "all", limit: int = Query(100, ge=1, le=10000), business: str | None = None):
     """V5 anomaly results formatted for the Executive AI affected-records view."""
     conn = get_connection()
     try:
         rows = _engine_rows(conn.cursor())
         if not rows:
             return {"ready": False, "hint": "No anomaly results found. Run the V5 trust pipeline first."}
+        # These summaries back the four top KPI cards and What's firing. Keep
+        # their original global calculations independent of table filters.
         total = len(rows)
         total_flagged = sum(_engine_flagged(row) for row in rows)
         total_businesses = len({row.get("businessid") for row in rows if row.get("businessid")})
-        business_rows = defaultdict(list)
-        for row in rows:
-            if row.get("businessid"):
-                business_rows[row["businessid"]].append(row)
-        anomalous_businesses = {bid for bid, group in business_rows.items() if any(_engine_flagged(r) for r in group)}
+        below_threshold_count = total_flagged
+        anomalous_businesses = {
+            row.get("businessid") for row in rows
+            if row.get("businessid") and _engine_flagged(row)
+        }
         by_detector = {
             label: sum(bool(row.get(column)) for row in rows)
             for label, column in ENGINE_METHODS
         }
+        # A record can be recalculated in multiple monthly batches. For this
+        # view, its stable identity is business + record + lineage; retain only
+        # the newest batch version so the same record is not counted twice.
+        newest_by_record = {}
+        rows_without_identity = []
+        for row in rows:
+            record_id = row.get("record_id")
+            business_id = row.get("businessid")
+            record_lineage = row.get("data_lineage")
+            if record_id is None or business_id is None or record_lineage is None:
+                rows_without_identity.append(row)
+                continue
+            identity = (
+                str(business_id).strip().upper(),
+                str(record_id).strip(),
+                str(record_lineage).strip().upper(),
+            )
+            batch_id = str(row.get("batch_id") or "")
+            previous = newest_by_record.get(identity)
+            if previous is None or batch_id >= str(previous.get("batch_id") or ""):
+                newest_by_record[identity] = row
+        rows = list(newest_by_record.values()) + rows_without_identity
         selected = rows
         if business:
-            selected = [row for row in selected if str(row.get("businessid")) == business]
+            selected = [row for row in selected if str(row.get("businessid", "")).strip().upper() == business.strip().upper()]
         lineage = lineage.upper()
         lineage_value = {"B": "CURRENT_MONTH", "A": "PREVIOUS_MONTH", "H": "HISTORICAL"}.get(lineage)
         if lineage_value:
             selected = [row for row in selected if row.get("data_lineage") == lineage_value]
+        business_rows = defaultdict(list)
+        for row in selected:
+            if row.get("businessid"):
+                business_rows[row["businessid"]].append(row)
         selected.sort(key=lambda row: row.get("overall_anomaly_risk") or 0, reverse=True)
         records = []
         for row in selected[:limit]:
@@ -594,7 +817,7 @@ def anomaly_records(lineage: str = "all", limit: int = Query(100, ge=1, le=500),
         businesses.sort(key=lambda row: row["worst_risk"], reverse=True)
         return {
             "ready": True, "total_records": total, "total_businesses": total_businesses,
-            "total_anomalous_records": total_flagged, "below_threshold_count": total_flagged,
+            "total_anomalous_records": total_flagged, "below_threshold_count": below_threshold_count,
             "anomalous_businesses": len(anomalous_businesses), "trust_threshold": 75,
             "risk_threshold": 50, "records": records, "businesses": businesses,
             "by_detector": by_detector,
@@ -648,6 +871,23 @@ def executive_churn_risk(tier: str = "all", limit: int = Query(100, ge=1, le=100
         scored = clean_rows(rows_as_dicts(cur))
         counts = Counter((row.get("risk_tier") or "UNKNOWN").upper() for row in scored)
         at_risk = counts.get("CRITICAL", 0) + counts.get("HIGH", 0)
+
+        def churn_category(value):
+            label = str(value or "").strip()
+            return "Unknown" if label in {"", "—", "�"} else label
+
+        def at_risk_groups(field):
+            grouped = Counter({churn_category(row.get(field)): 0 for row in scored})
+            for row in scored:
+                if (row.get("risk_tier") or "").upper() in {"CRITICAL", "HIGH"}:
+                    grouped[churn_category(row.get(field))] += 1
+            return [
+                {"name": name, "count": count}
+                for name, count in sorted(grouped.items(), key=lambda item: (-item[1], item[0].casefold()))
+            ]
+
+        by_industry = at_risk_groups("industry")
+        by_segment = at_risk_groups("segment")
         filtered = scored if tier.lower() == "all" else [r for r in scored if (r.get("risk_tier") or "").upper() == tier.upper()]
         cur.execute("""
             SELECT FEATURE_NAME, IMPORTANCE FROM DM_V5_CHURN_FEATURE_IMPORTANCE
@@ -687,7 +927,7 @@ def executive_churn_risk(tier: str = "all", limit: int = Query(100, ge=1, le=100
             "avg_churn_probability": round(sum(float(r.get("churn_probability") or 0) for r in scored) / len(scored) * 100, 2) if scored else 0,
             "tier_counts": {name: counts.get(name, 0) for name in ("CRITICAL", "HIGH", "WATCH", "LOW")},
             "tier_colors": {"CRITICAL": "#e7000b", "HIGH": "#fe9a00", "WATCH": "#2563eb", "LOW": "#179765"},
-            "by_industry": [], "by_segment": [], "feature_importance": [
+            "by_industry": by_industry, "by_segment": by_segment, "feature_importance": [
                 {"feature": r.get("feature_name"), "importance": r.get("importance")} for r in importance
             ], "validation": validation, "businesses": mapped,
         }
@@ -709,11 +949,67 @@ def engine_anomaly():
         if not rows:
             return {"ready": False, "hint": "No anomaly results found. Run the V5 trust pipeline first."}
 
+        trust_by_batch = _engine_trust_by_batch(cur)
         current_trust = _engine_current_trust(cur)
         current = [row for row in rows if row.get("data_lineage") == "CURRENT_MONTH"]
         if not current:
             current_batch = rows[-1].get("batch_id")
             current = [row for row in rows if row.get("batch_id") == current_batch]
+
+        weights = {
+            "anomaly_health": 0.40,
+            "drift_health": 0.25,
+            "business_health": 0.20,
+            "freshness_health": 0.15,
+        }
+
+        def row_health(row):
+            batch_trust = trust_by_batch.get(row.get("batch_id"), {})
+            values = {
+                "anomaly_health": row.get("anomaly_health"),
+                "drift_health": row.get("drift_health"),
+                "business_health": row.get("quality_health"),
+                "freshness_health": row.get("freshness_health"),
+            }
+            fallback_keys = {
+                "anomaly_health": "anomaly_health",
+                "drift_health": "drift_health",
+                "business_health": "business_health",
+                "freshness_health": "freshness_health",
+            }
+            for key, fallback_key in fallback_keys.items():
+                if values[key] is None:
+                    values[key] = batch_trust.get(fallback_key)
+            usable = [key for key, value in values.items() if value is not None]
+            if not usable:
+                return None, values
+            score = sum(weights[key] * float(values[key]) for key in usable)
+            score /= sum(weights[key] for key in usable)
+            return score, values
+
+        health_rows = [(row, *row_health(row)) for row in rows]
+
+        def pillar_stat(key):
+            values = [values[key] for _, _, values in health_rows if values.get(key) is not None]
+            below = sum(float(values[key]) < 0.75 for _, _, values in health_rows if values.get(key) is not None)
+            return {
+                "avg_health": _engine_percent(sum(values) / len(values)) if values else None,
+                "below_threshold": below,
+                "records": len(values),
+            }
+
+        pillar_stats = {
+            "Anomaly": pillar_stat("anomaly_health"),
+            "Drift": pillar_stat("drift_health"),
+            "Business Rules": pillar_stat("business_health"),
+            "Freshness": pillar_stat("freshness_health"),
+        }
+        critical_records = sum(score is not None and score < 0.75 for _, score, _ in health_rows)
+        current_ids = {id(row) for row in current}
+        critical_current = sum(
+            score is not None and score < 0.75
+            for row, score, _ in health_rows if id(row) in current_ids
+        )
 
         methods = [
             {
@@ -762,11 +1058,11 @@ def engine_anomaly():
             ),
             "total_records": len(rows),
             "any_signal_flagged": sum(_engine_flagged(row) for row in rows),
-            "flagged_records": None,
+            "flagged_records": critical_records,
             "records_this_month": len(current),
             "any_signal_this_month": sum(_engine_flagged(row) for row in current),
-            "critical_this_month": None,
-            "pillar_stats": None,
+            "critical_this_month": critical_current,
+            "pillar_stats": pillar_stats,
             "by_method": methods,
             "lineage_breakdown": lineage_breakdown,
             "overlap_dist": [
@@ -855,48 +1151,84 @@ def engine_business():
             return {"ready": False, "hint": "No trust results found. Run the V5 trust pipeline first."}
 
         batch_id = current_trust["batch_id"]
-        cur.execute("""
-            SELECT COUNT(*) AS TOTAL_RECORDS,
-                   NVL(SUM(CASE WHEN NVL(BUSINESS_RULE_FLAGS, 0) > 0 THEN 1 ELSE 0 END), 0) AS FLAGGED_RECORDS,
-                   NVL(MAX(BUSINESS_RULE_FLAGS), 0) AS MAX_FLAGS,
-                   AVG(QUALITY_HEALTH) AS AVG_QUALITY_HEALTH,
-                   NVL(AVG(BUSINESS_RULE_FLAGS), 0) AS AVG_FLAGS
-            FROM DM_V5_QUALITY_RESULTS
-            WHERE BATCH_ID = :batch_id
-        """, {"batch_id": batch_id})
-        summary = clean_rows(rows_as_dicts(cur))[0]
-        cur.execute("""
-            SELECT NVL(BUSINESS_RULE_FLAGS, 0) AS BUSINESS_RULE_FLAGS, COUNT(*) AS RECORD_COUNT
-            FROM DM_V5_QUALITY_RESULTS
-            WHERE BATCH_ID = :batch_id
-            GROUP BY NVL(BUSINESS_RULE_FLAGS, 0)
-            ORDER BY BUSINESS_RULE_FLAGS
-        """, {"batch_id": batch_id})
-        flag_groups = clean_rows(rows_as_dicts(cur))
-        severity_dist = []
-        for group in flag_groups:
-            flag_count = int(group.get("business_rule_flags") or 0)
-            if flag_count == 0:
-                label = "Clean (0)"
-            else:
-                label = f"{flag_count} rule flag{'s' if flag_count != 1 else ''}"
-            severity_dist.append({"label": label, "count": group.get("record_count") or 0})
+        rows = _engine_rows(cur)
+        if not rows:
+            return {"ready": False, "hint": "No quality results found for the latest trust batch."}
+
+        def flags(row):
+            try:
+                return max(0, int(row.get("business_rule_flags") or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        def health(row):
+            value = row.get("quality_health")
+            return None if value is None else _engine_percent(value)
+
+        current_rows = [
+            row for row in rows
+            if str(row.get("data_lineage") or "").upper() == "CURRENT_MONTH"
+        ]
+        summary_rows = current_rows or rows
+        distribution_source = summary_rows
+        severity_ranges = (
+            ("Clean (0)", lambda count: count == 0),
+            ("Low (1-3)", lambda count: 1 <= count <= 3),
+            ("Medium (4-8)", lambda count: 4 <= count <= 8),
+            ("High (9-15)", lambda count: 9 <= count <= 15),
+            ("Critical (16+)", lambda count: count >= 16),
+        )
+        severity_dist = [
+            {"label": label, "count": sum(test(flags(row)) for row in distribution_source)}
+            for label, test in severity_ranges
+        ]
+
+        def lineage_key(row):
+            value = str(row.get("data_lineage") or "").upper()
+            return value if value in {"HISTORICAL", "PREVIOUS_MONTH", "CURRENT_MONTH"} else value
+
+        lineage_business = []
+        for lineage in ("HISTORICAL", "PREVIOUS_MONTH", "CURRENT_MONTH"):
+            lineage_rows = [row for row in rows if lineage_key(row) == lineage]
+            health_values = [health(row) for row in lineage_rows if health(row) is not None]
+            flag_values = [flags(row) for row in lineage_rows]
+            lineage_business.append({
+                "lineage": lineage,
+                "total": len(lineage_rows),
+                "business_health": round(sum(health_values) / len(health_values), 2) if health_values else None,
+                "avg_violations": round(sum(flag_values) / len(flag_values), 2) if flag_values else 0,
+                "max_violations": max(flag_values) if flag_values else 0,
+            })
+
+        worst_source = current_rows or rows
+        worst_business = [
+            {
+                "record_id": row.get("record_id"),
+                "businessID": row.get("businessid"),
+                "business_health": health(row),
+                "violations": flags(row),
+            }
+            for row in worst_source
+            if row.get("record_id") is not None
+        ]
+        worst_business.sort(key=lambda row: (
+            row.get("business_health") is None,
+            row.get("business_health") if row.get("business_health") is not None else float("inf"),
+            -row.get("violations", 0),
+        ))
+        configured_params, _ = load_config()
+        max_possible_flags = int(configured_params.get("MAX_POSSIBLE_FLAGS", 22))
+        flagged_records = sum(flags(row) > 0 for row in summary_rows)
 
         return {
             "ready": True,
-            "max_possible_flags": summary.get("max_flags") or 0,
+            "max_possible_flags": max_possible_flags,
             "severity_dist": severity_dist,
-            "lineage_business": [{
-                "lineage": "CURRENT_MONTH",
-                "total": summary.get("total_records") or 0,
-                "business_health": _engine_percent(current_trust.get("business_health")),
-                "avg_violations": round(float(summary.get("avg_flags") or 0), 2),
-                "max_violations": summary.get("max_flags") or 0,
-            }],
-            "worst_business": [],
+            "lineage_business": lineage_business,
+            "worst_business": worst_business,
             "current_month_trust": _engine_percent(current_trust.get("business_health")),
-            "total_records": summary.get("total_records") or 0,
-            "flagged_records": summary.get("flagged_records") or 0,
+            "total_records": len(summary_rows),
+            "flagged_records": flagged_records,
         }
     finally:
         conn.close()
@@ -911,8 +1243,19 @@ def engine_freshness():
         if not rows:
             return {"ready": False, "hint": "No freshness results found. Run the V5 trust pipeline first."}
 
-        lateness = [max(0, float(row.get("freshness_days_late") or 0)) for row in rows]
-        late = [value for value in lateness if value > 0]
+        def parsed_days_late(row):
+            value = row.get("freshness_days_late")
+            if value is None:
+                return None
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return None
+            return value if math.isfinite(value) else None
+
+        lateness = [parsed_days_late(row) for row in rows]
+        valid_lateness = [value for value in lateness if value is not None]
+        late = [value for value in valid_lateness if value > 0]
         total = len(rows)
         fresh_values = [
             row["freshness_health"] for row in rows
@@ -924,9 +1267,10 @@ def engine_freshness():
             ("3–7 days", lambda value: 2 < value <= 7),
             ("8+ days", lambda value: value > 7),
         )
+        display_labels = ("On time", "1-2 days", "3-7 days", "8+ days")
         distribution = [
-            {"label": label, "count": sum(test(value) for value in lateness)}
-            for label, test in bins
+            {"label": display_labels[index], "count": sum(test(value) for value in valid_lateness)}
+            for index, (_, test) in enumerate(bins)
         ]
 
         monthly_values = defaultdict(list)
@@ -938,7 +1282,8 @@ def engine_freshness():
                 lineage_values[row.get("data_lineage") or "UNKNOWN"].append(health)
         monthly_lateness = defaultdict(list)
         for row, days_late in zip(rows, lateness):
-            monthly_lateness[row.get("data_month") or "Unknown"].append(days_late)
+            if days_late is not None:
+                monthly_lateness[row.get("data_month") or "Unknown"].append(days_late)
 
         monthly = [
             {
@@ -956,18 +1301,18 @@ def engine_freshness():
                 "total": len(values),
                 "avg_freshness": _engine_percent(sum(values) / len(values)) if values else None,
                 "late_count": sum(
-                    max(0, float(row.get("freshness_days_late") or 0)) > 0
+                    parsed_days_late(row) is not None and parsed_days_late(row) > 0
                     for row in rows if (row.get("data_lineage") or "UNKNOWN") == lineage
                 ),
                 "late_rate": round(
                     sum(
-                        max(0, float(row.get("freshness_days_late") or 0)) > 0
+                        parsed_days_late(row) is not None and parsed_days_late(row) > 0
                         for row in rows if (row.get("data_lineage") or "UNKNOWN") == lineage
                     ) / len(values) * 100, 2
                 ) if values else 0,
                 "avg_days_late": round(
                     sum(
-                        max(0, float(row.get("freshness_days_late") or 0))
+                        parsed_days_late(row) or 0
                         for row in rows if (row.get("data_lineage") or "UNKNOWN") == lineage
                     ) / len(values), 2
                 ) if values else 0,
@@ -982,24 +1327,24 @@ def engine_freshness():
                 "businessID": row.get("businessid"),
                 "data_month": row.get("data_month"),
                 "lineage": row.get("data_lineage"),
-                "days_late": max(0, float(row.get("freshness_days_late") or 0)),
+                "days_late": parsed_days_late(row),
                 "freshness_health": _engine_percent(row.get("freshness_health")),
             }
             for row in sorted(
                 current,
-                key=lambda item: float(item.get("freshness_days_late") or 0),
+                key=lambda item: parsed_days_late(item) or 0,
                 reverse=True,
             )[:20]
-            if float(row.get("freshness_days_late") or 0) > 0
+            if parsed_days_late(row) is not None and parsed_days_late(row) > 0
         ]
 
         return {
             "ready": True,
             "total_records": total,
             "late_count": len(late),
-            "ontime_count": total - len(late),
+            "ontime_count": sum(value <= 0 for value in valid_lateness),
             "late_rate": round(len(late) / total * 100, 2) if total else 0,
-            "avg_days_late": round(sum(lateness) / total, 2) if total else 0,
+            "avg_days_late": round(sum(valid_lateness) / len(valid_lateness), 2) if valid_lateness else 0,
             "max_days_late": max(lateness, default=0),
             "avg_days_late_of_late": round(sum(late) / len(late), 2) if late else 0,
             "fresh_pct": _engine_percent(sum(fresh_values) / len(fresh_values)) if fresh_values else None,
@@ -1170,7 +1515,10 @@ def forecast():
         result_series = []
         for name, label, kind, overall, history, value_key in series_defs:
             matching = forecasts_by_name.get(name.lower(), [])
-            scale = _percent if kind == "pillar" else lambda v: v
+            # The ARIMA Forecast page and alert detail modal use the raw Oracle
+            # values (for example, 0.8525). The Executive overview applies the
+            # 0-100 display scale separately through /api/home.
+            scale = lambda value: value
             actuals = [scale(row.get(value_key)) for row in history]
             hist_labels = [str(row.get("data_month")) for row in history]
             matching.sort(key=lambda row: str(row.get("forecast_month") or ""))
@@ -1189,16 +1537,17 @@ def forecast():
 
         ui_alerts = []
         for row in alerts:
-            is_trust = (row.get("series_name") or "").lower() in {
-                "anomaly_health", "drift_health", "business_health",
-                "freshness_health", "overall_dataset_trust",
-            }
-            scale_alert = _percent if is_trust else lambda value: value
+            month = str(row.get("forecast_month") or "")
+            try:
+                month = datetime.strptime(month[:7], "%Y-%m").strftime("%B")
+            except ValueError:
+                pass
             ui_alerts.append({
                 "metric": row.get("series_name"), "trigger": row.get("trigger_type"),
-                "month": row.get("forecast_month"), "severity": row.get("severity"),
-                "forecast": scale_alert(row.get("forecast_value")),
-                "threshold": scale_alert(row.get("threshold_value")),
+                "month": month, "severity": row.get("severity"),
+                "forecast": row.get("forecast_value"),
+                "threshold": row.get("threshold_value"),
+                "delta": row.get("delta_value"),
                 "reason": row.get("reason"),
             })
         return {"ready": True, "horizon": 4, "series": result_series, "alerts": ui_alerts,
@@ -1224,7 +1573,8 @@ def _latest_arima_results(cur):
             return [], [], False
 
         cur.execute("""
-            SELECT SERIES_NAME, FORECAST_MONTH, FORECAST_VALUE, LOWER_95, UPPER_95, THRESHOLD_VALUE
+            SELECT SERIES_NAME, FORECAST_MONTH, FORECAST_VALUE, LOWER_95, UPPER_95,
+                   THRESHOLD_VALUE, ARIMA_ORDER, MAPE, CONFIDENCE_LABEL
             FROM DM_V5_ARIMA_FORECASTS
             WHERE RUN_ID = :run_id
             ORDER BY SERIES_NAME, FORECAST_MONTH
@@ -1232,7 +1582,8 @@ def _latest_arima_results(cur):
         forecasts = clean_rows(rows_as_dicts(cur))
 
         cur.execute("""
-            SELECT SERIES_NAME, TRIGGER_TYPE, FORECAST_MONTH, SEVERITY, REASON
+            SELECT SERIES_NAME, TRIGGER_TYPE, FORECAST_MONTH, SEVERITY,
+                   FORECAST_VALUE, THRESHOLD_VALUE, DELTA_VALUE, REASON
             FROM DM_V5_ARIMA_ALERTS
             WHERE RUN_ID = :run_id
             ORDER BY MONTH_AHEAD, SERIES_NAME

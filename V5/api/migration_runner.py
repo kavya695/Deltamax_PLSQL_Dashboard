@@ -579,6 +579,44 @@ def migration_results():
         raise HTTPException(status_code=500, detail=f"Could not read the Oracle-to-BigQuery run report: {exc}") from exc
 
 
+@router.get("/api/migration/overview")
+def migration_overview():
+    """Return the live Oracle → BigQuery overview data used by the dashboard."""
+    report = migration_results()
+    if not report.get("ready"):
+        return report
+
+    connection = _migration_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            """SELECT BATCH_ID, TOTAL_RECORDS, ANOMALY_HEALTH, DRIFT_HEALTH,
+                      BUSINESS_HEALTH, FRESHNESS_HEALTH, OVERALL_DATASET_TRUST
+               FROM DM_V5_TRUST_RESULTS ORDER BY BATCH_ID"""
+        )
+        trust_rows = [dict(zip([d[0].lower() for d in cursor.description], row)) for row in cursor.fetchall()]
+        clean_trust = [
+            {key: value for key, value in row.items() if value is not None}
+            for row in trust_rows
+        ]
+        record_rows = next(
+            (item for item in report.get("tables", [])
+             if str(item.get("table", "")).upper() in {"DM_V5_STG_CREDIT_BUREAU", "MIG_PIPELINE_DATA"}),
+            None,
+        )
+        records_migrated = (record_rows or {}).get("bigquery_rows")
+        return {
+            **report,
+            "source_cloud": "Oracle",
+            "target_cloud": "BigQuery",
+            "records_migrated": records_migrated,
+            "trust_trend": clean_trust,
+            "data_source": "Oracle DM_V5_TRUST_RESULTS and Oracle → BigQuery migration report",
+        }
+    finally:
+        connection.close()
+
+
 def _completed_reverse_rows_from_forward_report() -> list[dict[str, str]]:
     """Expose the completed 29-table transfer as the reverse-page report.
 

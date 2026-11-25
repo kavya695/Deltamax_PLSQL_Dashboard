@@ -15,14 +15,43 @@ export default defineConfig({
   plugins: [
     react(),
     {
+      name: 'stabilize-migration-bundle-hooks',
+      transform(code, id) {
+        const cleanId = id.split('?')[0].replaceAll('\\', '/')
+        if (!cleanId.endsWith('/index-AffectedFilterFix.js')) return null
+        const conditional = 'if(_cmActive)return a.jsx("div",{id:"dm-cm-mount",style:{minHeight:"100%",flex:"1"}});const{data:e,loading:r,error:n}=ct("/api/migration",t);'
+        const stable = 'const{data:e,loading:r,error:n}=ct("/api/migration",t);if(_cmActive)return a.jsx("div",{id:"dm-cm-mount",style:{minHeight:"100%",flex:"1"}});'
+        if (!code.includes(conditional)) return null
+        return { code: code.replace(conditional, stable), map: null }
+      },
+    },
+    {
       name: 'serve-built-assets-from-dist',
       configureServer(server) {
-        server.middlewares.use((req, _res, next) => {
+        server.middlewares.use((req, res, next) => {
           if (req.url?.startsWith('/assets/')) {
             req.url = `/dist${req.url}`
           }
+          if (req.url?.startsWith('/reverse-ui.js') || req.url === '/' || req.url?.startsWith('/index.html')) {
+            const setHeader = res.setHeader.bind(res)
+            res.setHeader = (name, value) => {
+              if (String(name).toLowerCase() === 'content-type') {
+                if (String(value).startsWith('text/javascript')) value = 'text/javascript; charset=utf-8'
+                if (String(value).startsWith('text/html')) value = 'text/html; charset=utf-8'
+              }
+              return setHeader(name, value)
+            }
+          }
           next()
         })
+        return () => {
+          server.middlewares.use((req, res, next) => {
+            if (req.url?.startsWith('/reverse-ui.js')) {
+              res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+            }
+            next()
+          })
+        }
       },
     },
   ],

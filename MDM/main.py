@@ -108,6 +108,12 @@ def mdm_dashboard():
         """)
         bins = [(0, 60, "0–60"), (60, 70, "60–70"), (70, 80, "70–80"),
                 (80, 90, "80–90"), (90, 101, "90–100")]
+        bins = [
+            (float("-inf"), 60, "Poor (<60)"),
+            (60, 80, "Fair (60-80)"),
+            (80, 90, "Good (80-90)"),
+            (90, float("inf"), "Excellent (>90)"),
+        ]
         counts = Counter()
         for row in golden_scores:
             score = float(row["trust_score"] or 0)
